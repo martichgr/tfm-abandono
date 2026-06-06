@@ -8,7 +8,7 @@ from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 from imblearn.over_sampling import SMOTE
 
-st.set_page_config(page_title="Prediccion de abandono escolar", layout="wide")
+st.set_page_config(page_title="Predicción de abandono escolar", layout="wide")
 
 @st.cache_resource
 def preparar():
@@ -28,23 +28,23 @@ def preparar():
 
 rf, xgb, scaler, le, cols = preparar()
 
-st.sidebar.title("Configuracion")
-modelo_sel = st.sidebar.selectbox("Modelo de prediccion", ["XGBoost", "Random Forest"])
-st.sidebar.caption("Sistema de prediccion temprana del abandono escolar (TFM)")
+st.sidebar.title("Configuración")
+modelo_sel = st.sidebar.selectbox("Modelo de predicción", ["XGBoost", "Random Forest"])
+st.sidebar.caption("Sistema de predicción temprana del abandono escolar")
 
-st.title("Prediccion temprana del abandono escolar")
+st.title("Predicción temprana del abandono escolar")
 st.write("Introduce los datos del estudiante y pulsa Predecir.")
 st.subheader("Datos del estudiante")
 c1, c2, c3 = st.columns(3)
 with c1:
-    u2 = st.number_input("Unidades aprobadas 2o semestre", 0, 26, 5)
+    u2 = st.number_input("Unidades aprobadas 2º semestre", 0, 26, 5)
     u1 = st.number_input("Unidades aprobadas 1er semestre", 0, 26, 5)
 with c2:
-    matricula = st.selectbox("Matricula al dia", ["Si", "No"])
+    matricula = st.selectbox("Matricula al día", ["Sí", "No"])
     edad = st.number_input("Edad en la matricula", 17, 70, 20)
 with c3:
-    beca = st.selectbox("Becario", ["Si", "No"])
-    nota2 = st.number_input("Calificacion media 2o semestre", 0.0, 20.0, 12.0)
+    beca = st.selectbox("Becado", ["Sí", "No"])
+    nota2 = st.number_input("Calificación media 2º semestre", 0.0, 20.0, 12.0)
 
 if st.button("Predecir", type="primary"):
     x = np.zeros((1, len(cols)))
