@@ -19,7 +19,7 @@ st.set_page_config(page_title="Sistema de Predicción de Abandono Escolar",
 COL = {"Dropout": "#c0392b", "Enrolled": "#f39c12", "Graduate": "#27ae60"}
 plt.rcParams.update({"font.size": 8, "axes.titlesize": 9, "figure.dpi": 110})
 
-# Traduccion de nombres de variables a castellano (solo para mostrar)
+# Traducción de nombres de variables a castellano (sólo para mostrar)
 TRAD = {
     "Curricular units 2nd sem (approved)": "Unidades aprobadas (2º semestre)",
     "Curricular units 1st sem (approved)": "Unidades aprobadas (1er semestre)",
