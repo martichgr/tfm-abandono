@@ -2,15 +2,10 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from ucimlrepo import fetch_ucirepo
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.neural_network import MLPClassifier
+import joblib
+import tensorflow as tf
 from sklearn.metrics import (f1_score, recall_score, precision_score,
                              roc_auc_score, confusion_matrix)
-from xgboost import XGBClassifier
-from imblearn.over_sampling import SMOTE
 import shap
 
 st.set_page_config(page_title="Sistema de Predicción de Abandono Escolar",
@@ -19,7 +14,6 @@ st.set_page_config(page_title="Sistema de Predicción de Abandono Escolar",
 COL = {"Dropout": "#c0392b", "Enrolled": "#f39c12", "Graduate": "#27ae60"}
 plt.rcParams.update({"font.size": 8, "axes.titlesize": 9, "figure.dpi": 110})
 
-# Traducción de nombres de variables a castellano (sólo para mostrar)
 TRAD = {
     "Curricular units 2nd sem (approved)": "Unidades aprobadas (2º semestre)",
     "Curricular units 1st sem (approved)": "Unidades aprobadas (1er semestre)",
@@ -60,43 +54,35 @@ TRAD = {
 }
 TRAD_CLASE = {"Dropout": "Abandono", "Enrolled": "Matriculado", "Graduate": "Graduado"}
 
-def trad(nombre):
-    return TRAD.get(nombre, nombre)
-
-def trad_clase(c):
-    return TRAD_CLASE.get(c, c)
+def trad(n): return TRAD.get(n, n)
+def trad_clase(c): return TRAD_CLASE.get(c, c)
 
 
-# ------------------------------------------------------------------
-# Carga de datos, preprocesamiento y entrenamiento (una sola vez)
-# ------------------------------------------------------------------
 @st.cache_resource
-def preparar_todo():
-    datos = fetch_ucirepo(id=697)
-    X = datos.data.features
-    y = datos.data.targets["Target"]
-    cols = list(X.columns)
-
-    le = LabelEncoder()
-    y_cod = le.fit_transform(y)
-    scaler = StandardScaler()
-    X_esc = scaler.fit_transform(X)
-
-    X_tr, X_te, y_tr, y_te = train_test_split(
-        X_esc, y_cod, test_size=0.20, stratify=y_cod, random_state=42)
-    X_bal, y_bal = SMOTE(random_state=42).fit_resample(X_tr, y_tr)
-
-    rf = RandomForestClassifier(n_estimators=100, random_state=42).fit(X_bal, y_bal)
-    xgb = XGBClassifier(n_estimators=100, max_depth=6, learning_rate=0.1,
-                        eval_metric="mlogloss", random_state=42).fit(X_bal, y_bal)
-    mlp = MLPClassifier(hidden_layer_sizes=(128, 64), activation="relu",
-                        alpha=0.001, max_iter=300, random_state=42).fit(X_bal, y_bal)
-
+def cargar_todo():
+    rf = joblib.load("modelo_rf.joblib")
+    xgb = joblib.load("modelo_xgb.joblib")
+    mlp = tf.keras.models.load_model("modelo_mlp.keras")
+    scaler = joblib.load("scaler.joblib")
+    le = joblib.load("label_encoder.joblib")
+    cols = joblib.load("columnas.joblib")
+    X_te, y_te = joblib.load("test_data.joblib")
     idx_dp = list(le.classes_).index("Dropout")
 
+    def pred_clase(modelo, Xd):
+        # Keras devuelve probabilidades; sklearn/xgboost devuelven clases con predict
+        if isinstance(modelo, tf.keras.Model):
+            return modelo.predict(Xd, verbose=0).argmax(axis=1)
+        return modelo.predict(Xd)
+
+    def pred_proba(modelo, Xd):
+        if isinstance(modelo, tf.keras.Model):
+            return modelo.predict(Xd, verbose=0)
+        return modelo.predict_proba(Xd)
+
     def metricas(modelo):
-        pred = modelo.predict(X_te)
-        proba = modelo.predict_proba(X_te)
+        pred = pred_clase(modelo, X_te)
+        proba = pred_proba(modelo, X_te)
         return {
             "F1-score macro": round(f1_score(y_te, pred, average="macro"), 2),
             "Recall Abandono": round(recall_score(y_te, pred, labels=[idx_dp],
@@ -107,23 +93,26 @@ def preparar_todo():
                                            average="macro"), 2),
         }
 
-    met = {"Random Forest": metricas(rf),
-           "XGBoost": metricas(xgb),
-           "MLP": metricas(mlp)}
+    met = {"Random Forest": metricas(rf), "XGBoost": metricas(xgb), "MLP": metricas(mlp)}
+
+    from ucimlrepo import fetch_ucirepo
+    datos = fetch_ucirepo(id=697)
+    X = datos.data.features
+    y = datos.data.targets["Target"]
 
     return {"X": X, "y": y, "cols": cols, "le": le, "scaler": scaler,
             "rf": rf, "xgb": xgb, "mlp": mlp, "met": met,
-            "X_te": X_te, "y_te": y_te, "idx_dp": idx_dp}
+            "X_te": X_te, "y_te": y_te, "idx_dp": idx_dp,
+            "pred_clase": pred_clase, "pred_proba": pred_proba}
 
-D = preparar_todo()
+D = cargar_todo()
 cols, le, scaler = D["cols"], D["le"], D["scaler"]
+pred_clase, pred_proba = D["pred_clase"], D["pred_proba"]
 
 
 def modelo_obj(sel):
-    if sel.startswith("Random"):
-        return D["rf"], "Random Forest"
-    if sel.startswith("XGBoost"):
-        return D["xgb"], "XGBoost"
+    if sel.startswith("Random"): return D["rf"], "Random Forest"
+    if sel.startswith("XGBoost"): return D["xgb"], "XGBoost"
     return D["mlp"], "MLP"
 
 
@@ -143,7 +132,7 @@ def shap_local(modelo, nombre, x_esc):
     else:
         fondo = shap.kmeans(D["X_te"], 30)
         expl = shap.KernelExplainer(
-            lambda d: modelo.predict_proba(d)[:, D["idx_dp"]], fondo)
+            lambda d: modelo.predict(d, verbose=0)[:, D["idx_dp"]], fondo)
         vals = expl.shap_values(x_esc, nsamples=100)[0]
     serie = pd.Series(vals, index=[trad(c) for c in cols])
     return serie.sort_values(key=abs, ascending=False).head(6)
@@ -243,7 +232,7 @@ elif seccion == "Predicción":
                 "Curricular units 1st sem (grade)": n1,
             })
             modelo, nombre = modelo_obj(modelo_sel)
-            proba = modelo.predict_proba(x_esc)[0]
+            proba = pred_proba(modelo, x_esc)[0]
             clase = le.classes_[int(np.argmax(proba))]
 
             with c2:
@@ -312,7 +301,7 @@ elif seccion == "Predicción":
                 df_cols = df.reindex(columns=cols, fill_value=0)
                 x_esc = scaler.transform(df_cols.values)
                 modelo, nombre = modelo_obj(modelo_sel)
-                pred = modelo.predict(x_esc)
+                pred = pred_clase(modelo, x_esc)
                 df_res = df.copy()
                 df_res["Predicción"] = [trad_clase(le.classes_[p]) for p in pred]
                 st.dataframe(df_res, use_container_width=True)
@@ -365,7 +354,7 @@ elif seccion == "Comparativa de modelos":
     c = st.columns(3)
     for col, (nombre, modelo) in zip(
             c, [("Random Forest", D["rf"]), ("XGBoost", D["xgb"]), ("MLP", D["mlp"])]):
-        cm = confusion_matrix(D["y_te"], modelo.predict(D["X_te"]))
+        cm = confusion_matrix(D["y_te"], pred_clase(modelo, D["X_te"]))
         fig, ax = plt.subplots(figsize=(2.8, 2.6))
         ax.imshow(cm, cmap="Blues")
         etiquetas = [trad_clase(c_) for c_ in le.classes_]
